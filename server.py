@@ -1,34 +1,22 @@
-import io
 import time
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
-from PIL import Image
-from torchvision import transforms
 
+from infer import load_model
 from model import CLASSES
+from preprocess import load_image
 
 app = FastAPI(title="Satellite Inference")
-
-preprocess = transforms.Compose(
-    [
-        transforms.Resize((64, 64)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
 
 model = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @app.on_event("startup")
-def load_model():
+def startup():
     global model
-    model = torch.load("weights/landcover.pt", map_location=device, weights_only=False)
-    model.to(device)
-    model.eval()
+    model = load_model("weights/landcover.pt", device)
     print(f"model loaded on {device}")
 
 
@@ -43,12 +31,11 @@ def predict(file: UploadFile = File(...)):
         raise HTTPException(500, "model not loaded")
 
     try:
-        img = Image.open(io.BytesIO(file.file.read())).convert("RGB")
+        x = load_image(file.file.read()).unsqueeze(0).to(device)
     except Exception:
         raise HTTPException(400, "could not read image")
 
     start = time.time()
-    x = preprocess(img).unsqueeze(0).to(device)
     with torch.no_grad():
         logits = model(x)
         probs = torch.softmax(logits, dim=1)[0]

@@ -134,7 +134,7 @@ def main():
             f"train_acc={train_acc:.3f}  val_acc={vcorrect/vtotal:.3f}"
         )
 
-    torch.save(model, "weights/landcover.pt")
+    torch.save(model.state_dict(), "weights/landcover.pt")
     print("saved weights/landcover.pt")
 
 

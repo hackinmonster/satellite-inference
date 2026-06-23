@@ -1,32 +1,26 @@
 import argparse
-import sys
 
-import numpy as np
 import torch
-from PIL import Image
-from torchvision import transforms
 
-from model import CLASSES
-
-# copied from a torchvision tutorial — might not match training
-preprocess = transforms.Compose(
-    [
-        transforms.Resize((64, 64)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+from model import CLASSES, LandCoverNet
+from preprocess import load_image
 
 
-def load_model(path="weights/landcover.pt"):
-    model = torch.load(path, map_location="cpu", weights_only=False)
+def load_model(path="weights/landcover.pt", device="cpu"):
+    model = LandCoverNet()
+    state = torch.load(path, map_location=device, weights_only=False)
+    if isinstance(state, dict) and "conv1.weight" in state:
+        model.load_state_dict(state)
+    else:
+        # old checkpoints saved the whole module
+        model = state
+    model.to(device)
     model.eval()
     return model
 
 
-def predict(model, image_path):
-    img = Image.open(image_path).convert("RGB")
-    x = preprocess(img).unsqueeze(0)
+def predict(model, image_path, device="cpu"):
+    x = load_image(image_path).unsqueeze(0).to(device)
     with torch.no_grad():
         logits = model(x)
         probs = torch.softmax(logits, dim=1)[0]
