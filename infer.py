@@ -8,12 +8,8 @@ from preprocess import load_image
 
 def load_model(path="weights/landcover.pt", device="cpu"):
     model = LandCoverNet()
-    state = torch.load(path, map_location=device, weights_only=False)
-    if isinstance(state, dict) and "conv1.weight" in state:
-        model.load_state_dict(state)
-    else:
-        # old checkpoints saved the whole module
-        model = state
+    state = torch.load(path, map_location=device, weights_only=True)
+    model.load_state_dict(state)
     model.to(device)
     model.eval()
     return model

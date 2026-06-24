@@ -102,7 +102,7 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
 
-    for epoch in range(8):
+    for epoch in range(6):
         model.train()
         total = 0
         correct = 0
