@@ -3,48 +3,52 @@ import time
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
-from infer import load_model
-from model import CLASSES
+from engine import Engine
 from preprocess import load_image
 
 app = FastAPI(title="Satellite Inference")
-
-model = None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+engine = None
 
 
 @app.on_event("startup")
 def startup():
-    global model
-    model = load_model("weights/landcover.pt", device)
-    print(f"model loaded on {device}")
+    global engine
+    engine = Engine()
+    print(f"backend={engine.backend} device={engine.device}")
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "device": str(device)}
+    return {
+        "ok": True,
+        "device": str(engine.device) if engine else None,
+        "backend": engine.backend if engine else None,
+    }
 
 
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
-    if model is None:
+    if engine is None:
         raise HTTPException(500, "model not loaded")
-
     try:
-        x = load_image(file.file.read()).unsqueeze(0).to(device)
+        data = file.file.read()
+        load_image(data)
     except Exception:
         raise HTTPException(400, "could not read image")
+    return engine.predict(data)
 
-    start = time.time()
-    with torch.no_grad():
-        logits = model(x)
-        probs = torch.softmax(logits, dim=1)[0]
-        idx = int(probs.argmax())
-    elapsed_ms = (time.time() - start) * 1000
 
-    return {
-        "label": CLASSES[idx],
-        "confidence": round(float(probs[idx]), 4),
-        "scores": {CLASSES[i]: round(float(probs[i]), 4) for i in range(len(CLASSES))},
-        "latency_ms": round(elapsed_ms, 2),
-    }
+@app.post("/predict/batch")
+def predict_batch(files: list[UploadFile] = File(...)):
+    if engine is None:
+        raise HTTPException(500, "model not loaded")
+    if not files:
+        raise HTTPException(400, "no files")
+    tensors = []
+    try:
+        for f in files:
+            tensors.append(load_image(f.file.read()))
+    except Exception:
+        raise HTTPException(400, "could not read image")
+    results, latency_ms = engine.predict_many(tensors)
+    return {"results": results, "batch_latency_ms": round(latency_ms, 2), "n": len(results)}
