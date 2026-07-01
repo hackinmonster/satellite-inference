@@ -1,8 +1,9 @@
-import time
+import io
 
-import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from PIL import Image
 
+from detect import classify_grid
 from engine import Engine
 from preprocess import load_image
 
@@ -52,3 +53,17 @@ def predict_batch(files: list[UploadFile] = File(...)):
         raise HTTPException(400, "could not read image")
     results, latency_ms = engine.predict_many(tensors)
     return {"results": results, "batch_latency_ms": round(latency_ms, 2), "n": len(results)}
+
+
+@app.post("/predict/grid")
+def predict_grid(file: UploadFile = File(...)):
+    if engine is None:
+        raise HTTPException(500, "model not loaded")
+    try:
+        img = Image.open(io.BytesIO(file.file.read())).convert("RGB")
+    except Exception:
+        raise HTTPException(400, "could not read image")
+    try:
+        return classify_grid(engine, img)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
