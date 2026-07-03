@@ -16,6 +16,7 @@ engine = None
 def startup():
     global engine
     engine = Engine()
+    cache.connect()
     print(f"backend={engine.backend} device={engine.device}")
 
 
@@ -32,19 +33,16 @@ def health():
 def predict(file: UploadFile = File(...)):
     if engine is None:
         raise HTTPException(500, "model not loaded")
-
-    cached = cache.get(file.filename or "")
+    data = file.file.read()
+    cached = cache.get(data)
     if cached:
         cached["cached"] = True
         return cached
-
     try:
-        data = file.file.read()
-        load_image(data)
+        result = engine.predict(data)
     except Exception:
         raise HTTPException(400, "could not read image")
-    result = engine.predict(data)
-    cache.put(file.filename or "", result)
+    cache.put(data, result)
     result["cached"] = False
     return result
 
