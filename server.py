@@ -3,19 +3,23 @@ import io
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
 
+import cache
+from batcher import Batcher
 from detect import classify_grid
 from engine import Engine
 from preprocess import load_image
-import cache
 
 app = FastAPI(title="Satellite Inference")
 engine = None
+batcher = None
 
 
 @app.on_event("startup")
-def startup():
-    global engine
+async def startup():
+    global engine, batcher
     engine = Engine()
+    batcher = Batcher(engine)
+    batcher.start()
     cache.connect()
     print(f"backend={engine.backend} device={engine.device}")
 
@@ -30,16 +34,16 @@ def health():
 
 
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
-    if engine is None:
+async def predict(file: UploadFile = File(...)):
+    if batcher is None:
         raise HTTPException(500, "model not loaded")
-    data = file.file.read()
+    data = await file.read()
     cached = cache.get(data)
     if cached:
         cached["cached"] = True
         return cached
     try:
-        result = engine.predict(data)
+        result = await batcher.infer(data)
     except Exception:
         raise HTTPException(400, "could not read image")
     cache.put(data, result)
