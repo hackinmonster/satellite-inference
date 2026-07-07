@@ -16,6 +16,7 @@ weights/*.onnx
 weights/*.engine
 !weights/.gitkeep
 !weights/landcover.pt
+!weights/landcover.onnx
 samples/generated/
 *.log
 .DS_Store

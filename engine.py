@@ -1,3 +1,4 @@
+import os
 import time
 
 import torch
@@ -10,6 +11,19 @@ from preprocess import load_image
 class Engine:
     def __init__(self, weights="weights/landcover.pt"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.trt = None
+        trt_path = "weights/landcover.engine"
+        if os.path.exists(trt_path):
+            try:
+                from trt_engine import TRTEngine
+
+                self.trt = TRTEngine(trt_path)
+                self.backend = "tensorrt-fp16"
+                print("using tensorrt engine")
+                return
+            except Exception as e:
+                print(f"tensorrt load failed ({e}), falling back to pytorch")
+
         self.model = LandCoverNet()
         state = torch.load(weights, map_location=self.device, weights_only=True)
         self.model.load_state_dict(state)
@@ -21,6 +35,11 @@ class Engine:
         self.backend = "pytorch-fp16" if self.fp16 else "pytorch"
 
     def _run(self, batch):
+        if self.trt is not None:
+            arr = batch.float().cpu().numpy()
+            logits = torch.from_numpy(self.trt.predict(arr))
+            return F.softmax(logits, dim=1)
+
         if self.fp16:
             batch = batch.half()
         batch = batch.to(self.device, non_blocking=True)
