@@ -5,7 +5,7 @@ from preprocess import load_image
 
 
 class Batcher:
-    def __init__(self, engine, max_batch=16, max_wait_ms=50):
+    def __init__(self, engine, max_batch=16, max_wait_ms=8):
         self.engine = engine
         self.max_batch = max_batch
         self.max_wait_ms = max_wait_ms
