@@ -1,6 +1,8 @@
 import io
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 import cache
@@ -12,6 +14,11 @@ from preprocess import load_image
 app = FastAPI(title="Satellite Inference")
 engine = None
 batcher = None
+
+
+@app.get("/")
+def index():
+    return FileResponse("static/index.html")
 
 
 @app.on_event("startup")
@@ -79,3 +86,6 @@ def predict_grid(file: UploadFile = File(...)):
         return classify_grid(engine, img)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+app.mount("/samples", StaticFiles(directory="samples"), name="samples")

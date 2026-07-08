@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Satellite Inference</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 860px;
+      margin: 24px auto;
+      padding: 0 16px;
+      color: #222;
+    }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .sub { color: #666; margin-bottom: 20px; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .panel { flex: 1; min-width: 280px; }
+    #preview {
+      width: 192px;
+      height: 192px;
+      object-fit: contain;
+      background: #eee;
+      border: 1px solid #ccc;
+    }
+    .samples img {
+      width: 64px;
+      height: 64px;
+      margin: 4px 4px 0 0;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+    .samples img:hover { border-color: #333; }
+    button, input[type=file] { margin-top: 8px; }
+    button {
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    table { border-collapse: collapse; margin-top: 8px; }
+    td, th { border: 1px solid #ccc; padding: 4px 8px; font-size: 13px; }
+    .bar {
+      height: 10px;
+      background: #3b6cb5;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .meta { font-size: 13px; color: #555; margin-top: 8px; }
+    .grid-cell {
+      width: 48px;
+      height: 48px;
+      text-align: center;
+      font-size: 10px;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Satellite land cover</h1>
+  <p class="sub">Upload a 64x64 (or larger) RGB tile. Larger images can also be classified as a grid.</p>
+
+  <div class="row">
+    <div class="panel">
+      <img id="preview" alt="preview">
+      <div>
+        <input id="file" type="file" accept="image/*">
+      </div>
+      <div>
+        <button id="run">Predict</button>
+        <button id="grid">Predict grid</button>
+      </div>
+      <p>Samples</p>
+      <div class="samples" id="samples"></div>
+    </div>
+    <div class="panel">
+      <h2 id="label">—</h2>
+      <div id="scores"></div>
+      <div class="meta" id="meta"></div>
+      <div id="grid-out"></div>
+    </div>
+  </div>
+
+  <script>
+    const samples = ["water", "forest", "urban", "agriculture", "barren", "cloud", "mosaic"];
+    const colors = {
+      water: "#1e5ab4",
+      forest: "#1e6e28",
+      urban: "#5a5a5a",
+      agriculture: "#b4be3c",
+      barren: "#b48c50",
+      cloud: "#8a8a8e",
+    };
+    let currentFile = null;
+    const fileInput = document.getElementById("file");
+    const preview = document.getElementById("preview");
+
+    samples.forEach((name) => {
+      const img = document.createElement("img");
+      img.src = "/samples/" + name + ".png";
+      img.title = name;
+      img.onclick = async () => {
+        const res = await fetch(img.src);
+        const blob = await res.blob();
+        currentFile = new File([blob], name + ".png", { type: blob.type });
+        preview.src = img.src;
+      };
+      document.getElementById("samples").appendChild(img);
+    });
+
+    fileInput.onchange = () => {
+      currentFile = fileInput.files[0];
+      if (currentFile) preview.src = URL.createObjectURL(currentFile);
+    };
+
+    function showScores(data) {
+      document.getElementById("label").textContent = data.label + "  (" + (data.confidence * 100).toFixed(1) + "%)";
+      const box = document.getElementById("scores");
+      box.innerHTML = "";
+      const table = document.createElement("table");
+      Object.entries(data.scores).forEach(([k, v]) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + k + "</td><td>" + v.toFixed(3) + "</td><td><span class='bar' style='width:" + Math.round(v * 120) + "px'></span></td>";
+        table.appendChild(tr);
+      });
+      box.appendChild(table);
+      document.getElementById("meta").textContent =
+        data.backend + " · " + data.latency_ms + " ms · batch " + (data.batch_size || 1) +
+        (data.cached ? " · cached" : "");
+      document.getElementById("grid-out").innerHTML = "";
+    }
+
+    function showGrid(data) {
+      document.getElementById("label").textContent = data.rows + "×" + data.cols + " grid";
+      document.getElementById("scores").innerHTML = "";
+      document.getElementById("meta").textContent = data.batch_latency_ms + " ms for " + (data.rows * data.cols) + " tiles";
+      const table = document.createElement("table");
+      data.grid.forEach((row) => {
+        const tr = document.createElement("tr");
+        row.forEach((cell) => {
+          const td = document.createElement("td");
+          td.className = "grid-cell";
+          td.style.background = colors[cell] || "#000";
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      document.getElementById("grid-out").innerHTML = "";
+      document.getElementById("grid-out").appendChild(table);
+    }
+
+    async function post(url) {
+      if (!currentFile) {
+        alert("pick an image first");
+        return;
+      }
+      const body = new FormData();
+      body.append("file", currentFile);
+      const res = await fetch(url, { method: "POST", body });
+      if (!res.ok) {
+        alert("request failed: " + res.status);
+        return;
+      }
+      return res.json();
+    }
+
+    document.getElementById("run").onclick = async () => {
+      const data = await post("/predict");
+      if (data) showScores(data);
+    };
+    document.getElementById("grid").onclick = async () => {
+      const data = await post("/predict/grid");
+      if (data) showGrid(data);
+    };
+  </script>
+</body>
+</html>
