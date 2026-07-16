@@ -54,22 +54,3 @@ def classify_grid(engine: Engine, img, tile=TILE):
         "batch_latency_ms": round(latency_ms, 2),
         "classes": CLASSES,
     }
-
-
-def paint_map(grid, tile=TILE):
-    colors = {
-        "water": (30, 90, 180),
-        "forest": (30, 110, 40),
-        "urban": (90, 90, 90),
-        "agriculture": (180, 190, 60),
-        "barren": (180, 140, 80),
-        "cloud": (230, 230, 235),
-    }
-    rows = len(grid)
-    cols = len(grid[0])
-    img = Image.new("RGB", (cols * tile, rows * tile))
-    for r, row in enumerate(grid):
-        for c, label in enumerate(row):
-            patch = Image.new("RGB", (tile, tile), colors.get(label, (0, 0, 0)))
-            img.paste(patch, (c * tile, r * tile))
-    return img
