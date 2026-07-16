@@ -1,9 +1,10 @@
 import io
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 import cache
 from batcher import Batcher
@@ -11,24 +12,29 @@ from detect import classify_grid
 from engine import Engine
 from preprocess import load_image
 
-app = FastAPI(title="Satellite Inference")
 engine = None
 batcher = None
 
 
-@app.get("/")
-def index():
-    return FileResponse("static/index.html")
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global engine, batcher
     engine = Engine()
     batcher = Batcher(engine)
     batcher.start()
     cache.connect()
     print(f"backend={engine.backend} device={engine.device}")
+    yield
+    if batcher is not None and batcher.task is not None:
+        batcher.task.cancel()
+
+
+app = FastAPI(title="Satellite Inference", lifespan=lifespan)
+
+
+@app.get("/")
+def index():
+    return FileResponse("static/index.html")
 
 
 @app.get("/health")
@@ -51,7 +57,7 @@ async def predict(file: UploadFile = File(...)):
         return cached
     try:
         result = await batcher.infer(data)
-    except Exception:
+    except UnidentifiedImageError:
         raise HTTPException(400, "could not read image")
     cache.put(data, result)
     result["cached"] = False
@@ -68,7 +74,7 @@ def predict_batch(files: list[UploadFile] = File(...)):
     try:
         for f in files:
             tensors.append(load_image(f.file.read()))
-    except Exception:
+    except UnidentifiedImageError:
         raise HTTPException(400, "could not read image")
     results, latency_ms = engine.predict_many(tensors)
     return {"results": results, "batch_latency_ms": round(latency_ms, 2), "n": len(results)}
@@ -80,7 +86,7 @@ def predict_grid(file: UploadFile = File(...)):
         raise HTTPException(500, "model not loaded")
     try:
         img = Image.open(io.BytesIO(file.file.read())).convert("RGB")
-    except Exception:
+    except UnidentifiedImageError:
         raise HTTPException(400, "could not read image")
     try:
         return classify_grid(engine, img)

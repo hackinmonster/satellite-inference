@@ -32,3 +32,20 @@ def test_bad_image_returns_400():
     with TestClient(app) as client:
         r = client.post("/predict", files={"file": ("x.png", b"not-an-image", "image/png")})
         assert r.status_code == 400
+
+
+def test_batch_endpoint():
+    with TestClient(app) as client:
+        with open("samples/urban.png", "rb") as a, open("samples/water.png", "rb") as b:
+            r = client.post(
+                "/predict/batch",
+                files=[
+                    ("files", ("urban.png", a, "image/png")),
+                    ("files", ("water.png", b, "image/png")),
+                ],
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["n"] == 2
+        assert body["results"][0]["label"] == "urban"
+        assert body["results"][1]["label"] == "water"
