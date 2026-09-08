@@ -1,69 +1,73 @@
 # Satellite Imagery Inference Engine
 
-Classifies small RGB satellite tiles into 6 land-cover classes:
+Upload a satellite tile and get a land-cover label back.
 
-`water`, `forest`, `urban`, `agriculture`, `barren`, `cloud`
+The model classifies 64×64 RGB patches as water, forest, urban, agriculture, barren, or cloud. It is a small CNN trained on synthetic tiles that mimic Sentinel-2 colors. FastAPI serves it so you can use the browser UI or curl.
 
-The model is a small CNN trained on synthetic 64×64 tiles (color/texture stand-ins for real Sentinel-2 patches). A FastAPI service runs inference with optional GPU batching, Redis caching, and a TensorRT FP16 path when an NVIDIA GPU is available.
+If you have a GPU, concurrent requests get batched together. Redis can cache identical images. TensorRT can export an FP16 engine. CPU still works.
 
-## Features
+## Quick start
 
-- `POST /predict` — one image
-- `POST /predict/batch` — several images in one GPU/CPU batch
-- `POST /predict/grid` — sliding-window map over a larger image
-- Redis cache keyed by SHA-256 of the image bytes
-- Concurrent requests are coalesced into batches (8 ms window, up to 16)
-- ONNX export + TensorRT engine build (`export_onnx.py`, `export_trt.py`)
-- Simple browser UI at `/`
-
-## Setup
-
-Needs Python 3.10+ and [PyTorch](https://pytorch.org/get-started/locally/). CPU works. CUDA is used automatically if `torch.cuda.is_available()`.
+Python 3.10+ and [PyTorch](https://pytorch.org/get-started/locally/). CUDA is used when `torch.cuda.is_available()`.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install torch torchvision
 pip install -r requirements.txt
-```
-
-Redis is optional. If nothing is listening, the API still runs and just skips the cache.
-
-```bash
-# optional
-docker run -d -p 6379:6379 redis:7
-```
-
-Environment variables (see `.env.example`):
-
-| var | default | meaning |
-|---|---|---|
-| `REDIS_HOST` | `localhost` | redis hostname |
-| `REDIS_PORT` | `6379` | redis port |
-| `REDIS_DB` | `2` | redis database number |
-
-## Run
-
-```bash
-python train.py          # regenerate weights (optional, checkpoint is in weights/)
-python infer.py samples/urban.png
 uvicorn server:app --reload --port 8000
 ```
 
-Open http://127.0.0.1:8000 and click a sample tile, then Predict or Predict grid.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000), click a sample tile, then Predict. Predict grid runs a 64×64 window across larger images.
 
 ```bash
+python infer.py samples/urban.png
 curl -F "file=@samples/forest.png" http://127.0.0.1:8000/predict
+```
+
+Weights live in `weights/landcover.pt`. Run `python train.py` if you want to regenerate them.
+
+## API
+
+
+| endpoint              | what it does                                                       |
+| --------------------- | ------------------------------------------------------------------ |
+| `POST /predict`       | one image                                                          |
+| `POST /predict/batch` | several images in one forward pass                                 |
+| `POST /predict/grid`  | sliding-window map over a bigger image                             |
+| `GET /health`         | device and backend (`pytorch`, `pytorch-fp16`, or `tensorrt-fp16`) |
+
+
+The UI is `static/index.html` at `/`.
+
+Notes:
+
+- Images are resized to 64×64 and kept in `[0, 1]`. ImageNet mean/std did not match training and broke urban/agriculture predictions.
+- Redis is optional. Cache keys are a SHA-256 of the file bytes. Filenames collided when two different images used the same name.
+- The batcher waits up to 8 ms to fill a batch of 16. A 50 ms window added too much latency on single requests.
+
+Env vars (see `.env.example`):
+
+
+| var          | default     |
+| ------------ | ----------- |
+| `REDIS_HOST` | `localhost` |
+| `REDIS_PORT` | `6379`      |
+| `REDIS_DB`   | `2`         |
+
+
+```bash
+docker run -d -p 6379:6379 redis:7   # optional
 ```
 
 ## TensorRT
 
 ```bash
 python export_onnx.py
-python export_trt.py          # no-ops if TensorRT isn't installed
+python export_trt.py
 ```
 
-`export_trt.py` builds `weights/landcover.engine` with FP16 when the GPU supports it. On startup, `Engine` tries that file first and falls back to PyTorch (FP16 on CUDA, FP32 on CPU).
+`export_trt.py` exits if TensorRT is not installed. When the build works, it writes `weights/landcover.engine` with FP16 if the GPU supports it. `Engine` tries that file on startup and falls back to PyTorch.
 
 ## Benchmark
 
@@ -71,7 +75,7 @@ python export_trt.py          # no-ops if TensorRT isn't installed
 python benchmark.py --n 128 --batch 16
 ```
 
-On this CPU-only machine the small CNN is already cheap, so batching is only a modest win (~1.4×). The larger speedup is on GPU: FP16 TensorRT plus batched inference versus naive sequential FP32. Re-run the script on a CUDA box after `export_trt.py` to compare backends.
+On CPU, batching this CNN is about 1.4×. On GPU, compare sequential FP32 against batched FP16 TensorRT.
 
 ## Docker
 
@@ -79,7 +83,7 @@ On this CPU-only machine the small CNN is already cheap, so batching is only a m
 docker compose up --build
 ```
 
-API is on http://localhost:8000. Compose starts Redis internally. The image installs CPU PyTorch; for GPU/TensorRT use a CUDA base image and skip the CPU index in the Dockerfile.
+API is at [http://localhost:8000](http://localhost:8000). Compose starts Redis. The Dockerfile installs CPU PyTorch. Use a CUDA base image if you want the GPU stack.
 
 ## Tests
 
@@ -91,16 +95,15 @@ pytest tests/
 
 ```
 model.py          CNN + class names
-train.py          synthetic data + training loop
-preprocess.py     resize / to-tensor (must match training)
+train.py          synthetic data + training
+preprocess.py     resize / to-tensor
 engine.py         pytorch / tensorrt inference
 batcher.py        async request coalescing
 cache.py          redis
-detect.py         tiled grid over larger images
+detect.py         tiled grid
 server.py         fastapi
-trt_engine.py     tensorrt runtime wrapper
+trt_engine.py     tensorrt wrapper
 static/           upload page
-weights/          landcover.pt and landcover.onnx
+weights/          landcover.pt, landcover.onnx
 ```
 
-The first training run saved the whole `nn.Module` pickle and inference used ImageNet mean/std, which did not match training. Both of those are gone; checkpoints are `state_dict`s and tensors stay in `[0, 1]`.
